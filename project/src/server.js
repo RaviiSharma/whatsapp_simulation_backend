@@ -7,6 +7,8 @@
 const app = require("./app");
 const { PORT } = require("./config/env");
 const mongodb = require("./config/mongodb");
+const redis = require("./config/redis");
+const fraudReport = require("./services/fraudReport.service");
 
 /**
  * Initialize MongoDB connection
@@ -15,20 +17,35 @@ async function init() {
   console.log("🚀 Initializing WhatsApp AI Webhook System...");
 
   try {
+    // Connect to Redis (with fallback to in-memory)
+    await redis.connectRedis();
+
     // Connect to MongoDB (with fallback to in-memory)
     await mongodb.connectMongo();
+
+    // Initialize fraud reports collection
+    await fraudReport.initializeFraudReports();
 
     // Start HTTP server
     const server = app.listen(PORT, () => {
       console.log(`✅ Server running on port ${PORT}`);
       console.log(
-        `📊 Storage: ${mongodb.getStatus().mongodb ? "MongoDB" : "In-Memory (fallback)"}`,
+        `📊 Storage MongoDB: ${mongodb.getStatus().mongodb ? "Connected" : "In-Memory (fallback)"}`,
+      );
+      console.log(
+        `📊 Storage Redis: ${redis.getStatus().redis ? "Connected" : "In-Memory (fallback)"}`,
       );
       console.log(
         `🎯 Agents: hackerAgent, benignAgent, policyAgent, riskAgent`,
       );
       console.log(
         `\n🔗 Webhook endpoint: POST http://localhost:${PORT}/webhook`,
+      );
+      console.log(
+        `🔗 Admin dashboard: GET http://localhost:${PORT}/admin/stats`,
+      );
+      console.log(
+        `🔗 Fraud reports: GET http://localhost:${PORT}/admin/fraud/reports`,
       );
     });
 
@@ -50,8 +67,9 @@ function setupGracefulShutdown(server) {
     server.close(async () => {
       console.log("✅ HTTP server closed");
 
-      // Close MongoDB connection
+      // Close connections
       await mongodb.close();
+      await redis.close();
 
       console.log("✅ All connections closed");
       process.exit(0);

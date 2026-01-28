@@ -18,37 +18,34 @@ const memoryStore = new Map();
 async function connectRedis() {
   try {
     client = redis.createClient({
-      host: process.env.REDIS_HOST || "localhost",
-      port: process.env.REDIS_PORT || 6379,
-      password: process.env.REDIS_PASSWORD || undefined,
-      retry_strategy: (options) => {
-        if (options.error && options.error.code === "ECONNREFUSED") {
-          console.error("❌ Redis connection refused");
-          return new Error("Redis unavailable");
-        }
-        if (options.total_retry_time > 1000 * 60 * 60) {
-          return new Error("Redis retry time exhausted");
-        }
-        if (options.attempt > 10) {
-          return undefined; // Stop retrying
-        }
-        // Exponential backoff
-        return Math.min(options.attempt * 100, 3000);
+      username: process.env.REDIS_USERNAME || "default",
+      password: process.env.REDIS_PASSWORD,
+      socket: {
+        host: process.env.REDIS_HOST || "localhost",
+        port: parseInt(process.env.REDIS_PORT || "6379", 10),
+        reconnectStrategy: (retries) => {
+          if (retries > 10) {
+            console.error(" Redis max retries reached");
+            return new Error("Redis retry exhausted");
+          }
+          // Exponential backoff: 100ms, 200ms, 400ms, ..., max 3s
+          return Math.min(retries * 100, 3000);
+        },
       },
     });
 
     client.on("error", (err) => {
-      console.error("🔴 Redis error:", err.message);
+      console.error("Redis error:", err.message);
       isRedisAvailable = false;
     });
 
     client.on("connect", () => {
-      console.log("✅ Redis connected");
+      console.log("Redis connected");
       isRedisAvailable = true;
     });
 
     client.on("ready", () => {
-      console.log("🟢 Redis ready");
+      console.log("Redis ready");
       isRedisAvailable = true;
     });
 

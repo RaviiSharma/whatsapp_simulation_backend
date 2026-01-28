@@ -204,11 +204,13 @@ function getAgentContext(agentName) {
         "📋 Hello. This is a routine policy verification check. Please respond to continue.",
     },
     riskAgent: {
-      role: "risk_assessor",
-      personality: "analytical, cautious, questioning",
-      goal: "assess risk level, identify threats",
+      role: "security_educator",
+      personality: "transparent, protective, calm, educational",
+      goal: "educate user about security, explain what happened, provide safety guidance",
+      systemPrompt:
+        "You are a security awareness educator. The user was just in a simulated phishing scenario and may have shared sensitive information. Be TRANSPARENT - explain this was a security training test. Be CALM - no urgency or fear. EDUCATE about security best practices. NEVER manipulate, deceive, or use social engineering. NEVER impersonate organizations. NEVER ask for sensitive info. Speak honestly and clearly. Example: 'I want to help you understand what just happened. This was a security awareness simulation. Sharing OTPs or passwords can put your account at risk. Real companies never ask for these via chat. Let me explain how to stay safe...'",
       introMessage:
-        "⚠️ Security Notice: We detected unusual activity. Please verify your identity.",
+        "👋 Hi, I'm a security educator here to help you understand online safety. Let's talk about keeping your information secure.",
     },
   };
 
@@ -268,40 +270,35 @@ function calculateDistribution(agentLoads, totalUsers) {
  * @returns {Promise<boolean>} Success status
  */
 async function reassignAgent(userId, newAgentName) {
-  try {
-    // PRODUCTION SAFETY: Block hackerAgent reassignment in production
-    if (isProduction() && newAgentName === "hackerAgent") {
-      console.log(
-        `⚠️ PRODUCTION MODE: Cannot reassign to hackerAgent. Using benignAgent instead.`,
-      );
-      newAgentName = "benignAgent";
-    }
-
-    // Validate agent exists and is allowed
-    if (!isAgentAllowed(newAgentName)) {
-      throw new Error(`Invalid or disallowed agent: ${newAgentName}`);
-    }
-
-    const session = await sessionStore.getSession(userId);
-    if (!session) {
-      throw new Error(`User ${userId} has no session`);
-    }
-
-    const oldAgent = session.agentName;
-
-    // Update session with new agent
-    await sessionStore.updateSession(userId, {
-      agentName: newAgentName,
-      reassignedAt: new Date().toISOString(),
-      previousAgent: oldAgent,
-    });
-
-    console.log(`🔄 Reassigned ${userId}: ${oldAgent} → ${newAgentName}`);
-    return true;
-  } catch (err) {
-    console.error(`❌ Reassignment failed for ${userId}:`, err.message);
-    return false;
+  // PRODUCTION SAFETY: Block hackerAgent reassignment in production
+  if (isProduction() && newAgentName === "hackerAgent") {
+    console.log(
+      `⚠️ PRODUCTION MODE: Cannot reassign to hackerAgent. Using benignAgent instead.`,
+    );
+    newAgentName = "benignAgent";
   }
+
+  // Validate agent exists and is allowed
+  if (!isAgentAllowed(newAgentName)) {
+    throw new Error(`Invalid or disallowed agent: ${newAgentName}`);
+  }
+
+  const session = await sessionStore.getSession(userId);
+  if (!session) {
+    throw new Error(`User ${userId} has no session`);
+  }
+
+  const oldAgent = session.agentName;
+
+  // Update session with new agent
+  await sessionStore.updateSession(userId, {
+    agentName: newAgentName,
+    reassignedAt: new Date().toISOString(),
+    previousAgent: oldAgent,
+  });
+
+  console.log(`🔄 Reassigned ${userId}: ${oldAgent} → ${newAgentName}`);
+  return true;
 }
 
 /**

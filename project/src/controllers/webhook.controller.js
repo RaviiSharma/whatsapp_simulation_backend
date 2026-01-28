@@ -42,24 +42,24 @@ exports.verifyWebhook = (req, res) => {
 exports.receiveMessage = async (req, res) => {
   const requestTime = Date.now();
 
-  console.log("\n🔥 Webhook received from Meta");
+  console.log("\n Webhook received from Meta");
 
   // STEP 1: Return 200 immediately to Meta
   res.sendStatus(200);
 
   const responseTime = Date.now() - requestTime;
-  console.log(`⚡ Webhook responded in ${responseTime}ms`);
+  console.log(` Webhook responded in ${responseTime}ms`);
 
   // STEP 2: Parse message asynchronously
   try {
     const message = parseMessage(req.body);
 
     if (!message) {
-      console.log("⏭️ No valid message to process");
+      console.log(" No valid message to process");
       return;
     }
 
-    console.log(`📨 Parsed message from ${message.from}: "${message.text}"`);
+    console.log(` Parsed message from ${message.from}: "${message.text}"`);
 
     // STEP 3: Queue async processing (fire and forget)
     // Do NOT await - processing happens in background

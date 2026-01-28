@@ -365,6 +365,16 @@ function getStatus() {
   };
 }
 
+/**
+ * Get database instance
+ */
+function getDb() {
+  if (!db) {
+    throw new Error("MongoDB not initialized. Call connectMongo() first.");
+  }
+  return db;
+}
+
 module.exports = {
   connectMongo,
   getSession,
@@ -380,4 +390,5 @@ module.exports = {
   getAllSessions,
   close,
   getStatus,
+  getDb,
 };

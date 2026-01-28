@@ -152,7 +152,7 @@ function getDefaultIntroMessage(agentName) {
     policyAgent:
       "📋 Hello. This is a routine policy verification check. Please respond to continue.",
     riskAgent:
-      "⚠️ Security Notice: We detected unusual activity. Please verify your identity.",
+      "👋 Hi, I'm here to help you stay secure. Let's make sure everything is okay with your account.",
   };
 
   return intros[agentName] || "👋 Hello! Thanks for contacting us.";
@@ -169,7 +169,8 @@ function getFallbackMessage(agentName) {
     hackerAgent: "Please verify your account to continue.",
     benignAgent: "Thanks for your message. We'll get back to you shortly.",
     policyAgent: "Your request is being processed. Please wait.",
-    riskAgent: "We're reviewing your account. You'll receive an update soon.",
+    riskAgent:
+      "I'm here to help keep your account secure. For your safety, never share OTPs, passwords, or card details with anyone - even if they claim to be from support.",
   };
 
   return fallbacks[agentName] || "Thanks for your message.";

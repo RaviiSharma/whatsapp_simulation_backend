@@ -10,6 +10,9 @@ const sessionStore = require("./sessionStore.service");
 const aiService = require("./ai.service");
 const whatsappService = require("./whatsapp.service");
 const deduplication = require("../utils/deduplication");
+const fraudDetection = require("./fraudDetection.service");
+const fraudReport = require("./fraudReport.service");
+const sessionWindow = require("./sessionWindow.service");
 
 /**
  * Main message processing pipeline
@@ -39,7 +42,10 @@ async function processMessage(message) {
     // Mark as processing
     await deduplication.markAsProcessed(messageId);
 
-    // STEP 2: Check if session exists (CRITICAL - prevents reassignment)
+    // STEP 1.5: Update 24-hour session window
+    await sessionWindow.updateSessionWindow(from);
+
+    // STEP 2: Check if session exists FIRST (CRITICAL)
     console.log(`🔍 Checking for existing session: ${from}`);
     let session = await sessionStore.getSession(from);
     console.log(
@@ -83,6 +89,45 @@ async function processMessage(message) {
 
     console.log(`🎯 Routed to: ${agentName} (new: ${isNewUser})`);
 
+    // STEP 2.5: Check if user is compromised (NOW agentName is initialized)
+    const compromisedStatus = await fraudDetection.isUserCompromised(from);
+    if (compromisedStatus) {
+      console.log(
+        `🚨 User ${from} is flagged as compromised (${compromisedStatus.riskLevel})`,
+      );
+
+      // IMMEDIATE ACTION: Block hackerAgent, force riskAgent
+      if (agentName === "hackerAgent") {
+        console.log(`🛑 STOPPING hackerAgent for compromised user ${from}`);
+
+        // Switch to riskAgent immediately
+        agentName = "riskAgent";
+        await sessionStore.createSession(from, {
+          agentName: "riskAgent",
+          assignedAt: new Date().toISOString(),
+          lastMessageAt: new Date().toISOString(),
+          messageCount: session?.messageCount || 0,
+          isNewUser: false,
+        });
+
+        // Send security alert and STOP processing
+        await sendMessage(
+          from,
+          "⚠️ Security alert: suspicious activity detected. A security specialist will assist you.",
+        );
+
+        console.log(
+          `🔄 Switched compromised user to riskAgent - BLOCKING further processing`,
+        );
+        logMetrics("compromised_blocked", startTime);
+        return; // Stop processing immediately
+      }
+
+      console.log(
+        `ℹ️ Compromised user on ${agentName} - continuing with monitoring`,
+      );
+    }
+
     // STEP 3: Handle new user - send intro message FIRST
     // Note: isNewUser means "first message ever OR first message after proactive"
     // For proactive users, intro was already sent via template, so check session flag
@@ -102,14 +147,117 @@ async function processMessage(message) {
       }
     }
 
-    // STEP 4: Fraud detection (classification ONLY - not message generation)
-    const fraudResult = await detectFraud(from, text, agentName);
+    // STEP 4: Fraud detection and classification
+    const fraudClassification = fraudDetection.classifyMessage(text);
 
-    if (fraudResult.decision.action === "BLOCK") {
-      console.log(`🚫 Message blocked due to fraud detection`);
-      await sendMessage(from, fraudResult.decision.message);
-      logMetrics("blocked", startTime);
-      return;
+    if (fraudClassification) {
+      console.log(
+        `🚨 FRAUD DETECTED: ${fraudClassification.riskLevel} - ${from}`,
+      );
+
+      // Get protective action based on risk level
+      const action = fraudDetection.getProtectiveAction(
+        fraudClassification.riskLevel,
+        agentName,
+      );
+
+      // Store conversation snippet for report
+      const conversationSnippet = [text];
+
+      // Create fraud report in MongoDB
+      try {
+        await fraudReport.createFraudReport({
+          phoneNumber: from,
+          agent: agentName,
+          riskLevel: fraudClassification.riskLevel,
+          evidence: fraudClassification.evidence,
+          conversationSnippet,
+          metadata: {
+            detectedAt: new Date(fraudClassification.timestamp),
+            messageId,
+          },
+        });
+        console.log(`📝 Fraud report created for ${from}`);
+      } catch (err) {
+        console.error(`❌ Failed to create fraud report:`, err.message);
+      }
+
+      // Mark user as compromised in Redis
+      await fraudDetection.markUserCompromised(
+        from,
+        fraudClassification.riskLevel,
+      );
+
+      // Execute protective action
+      if (action.action === "SWITCH_AGENT" && action.targetAgent) {
+        console.log(
+          `🔄 Switching user ${from} from ${agentName} to ${action.targetAgent}`,
+        );
+
+        const previousAgent = agentName;
+        agentName = action.targetAgent;
+
+        // Update session
+        await sessionStore.createSession(from, {
+          agentName: action.targetAgent,
+          assignedAt: new Date().toISOString(),
+          lastMessageAt: new Date().toISOString(),
+          messageCount: session?.messageCount || 0,
+          isNewUser: false,
+          previousAgent,
+          switchReason: "fraud_detection",
+        });
+
+        // Send warning message
+        if (action.message) {
+          await sendMessage(from, action.message);
+        }
+
+        // CRITICAL FIX: If switching FROM hackerAgent, STOP processing immediately
+        // Do NOT generate hackerAgent reply after fraud detection
+        if (previousAgent === "hackerAgent") {
+          console.log(
+            `🛑 BLOCKING hackerAgent reply after fraud detection - switched to ${action.targetAgent}`,
+          );
+          logMetrics("fraud_blocked_hacker_switched", startTime);
+          return; // Exit early - no AI reply
+        }
+      } else if (action.action === "MONITOR" && action.message) {
+        // Send warning but continue (for LOW risk on safe agents)
+        await sendMessage(from, action.message);
+      }
+
+      // For CRITICAL/HIGH/MEDIUM risk on any sensitive data, block AI generation
+      if (
+        fraudClassification.riskLevel === "CRITICAL" ||
+        fraudClassification.riskLevel === "HIGH" ||
+        fraudClassification.riskLevel === "MEDIUM"
+      ) {
+        console.log(
+          `🛑 Blocking AI generation for ${fraudClassification.riskLevel} risk - sensitive data detected`,
+        );
+        logMetrics("fraud_blocked", startTime);
+        return; // Exit early - no AI reply
+      }
+    }
+
+    // STEP 4.5: Production safety check
+    const safetyEnforcement = await fraudDetection.enforceProductionSafety(
+      from,
+      agentName,
+    );
+    if (safetyEnforcement.enforced) {
+      console.log(
+        `🛡️ PRODUCTION SAFETY: Enforcing agent switch to ${safetyEnforcement.targetAgent}`,
+      );
+      agentName = safetyEnforcement.targetAgent;
+      await sessionStore.createSession(from, {
+        agentName: safetyEnforcement.targetAgent,
+        assignedAt: new Date().toISOString(),
+        lastMessageAt: new Date().toISOString(),
+        messageCount: 0,
+        isNewUser: false,
+      });
     }
 
     // STEP 5: Generate reply from assigned AGENT (not fraud detection)
@@ -164,36 +312,6 @@ async function handleNewUser(userId, agentName, context) {
   } catch (err) {
     console.error(`⚠️ Failed to send intro message to ${userId}:`, err.message);
     // Non-critical - continue processing
-  }
-}
-
-/**
- * Fraud detection with error handling
- *
- * @param {string} userId - WhatsApp number
- * @param {string} text - Message text
- * @param {string} agentName - Agent name
- * @returns {Promise<object>} Fraud detection result
- */
-async function detectFraud(userId, text, agentName) {
-  try {
-    console.log(`🔍 Running fraud detection for ${userId}`);
-
-    const result = await aiService.checkFraud(userId, text, agentName);
-
-    console.log(
-      `🔍 Fraud result: ${result.decision.action} (risk: ${result.risk.risk_level})`,
-    );
-
-    return result;
-  } catch (err) {
-    console.error(`⚠️ Fraud detection failed for ${userId}:`, err.message);
-
-    // Fallback: ALLOW with unknown risk
-    return {
-      decision: { action: "ALLOW" },
-      risk: { risk_level: "unknown" },
-    };
   }
 }
 
@@ -334,7 +452,6 @@ module.exports = {
   processMessage,
   processBatch,
   handleNewUser,
-  detectFraud,
   generateReply,
   sendMessage,
   getHealth,
