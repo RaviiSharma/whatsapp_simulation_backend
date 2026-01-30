@@ -346,6 +346,128 @@ async function deleteFraudReport(reportId) {
 }
 
 /**
+ * Update fraud report with agent switch information
+ *
+ * @param {string} phoneNumber - User's phone number
+ * @param {object} switchInfo - Agent switch details
+ * @returns {Promise<boolean>} Success status
+ */
+async function updateFraudReportAgentSwitch(phoneNumber, switchInfo) {
+  try {
+    const db = getDb();
+    const collection = db.collection(COLLECTION);
+
+    // Hash phone number to find report
+    const phoneNumberHash = require("crypto")
+      .createHash("sha256")
+      .update(phoneNumber)
+      .digest("hex");
+
+    // Find most recent active report for this user
+    const report = await collection.findOne(
+      { phoneNumberHash, status: "active" },
+      { sort: { createdAt: -1 } },
+    );
+
+    if (!report) {
+      console.warn(`⚠️ No active fraud report found for ${phoneNumber}`);
+      return false;
+    }
+
+    // Update with agent switch info and actions
+    const result = await collection.updateOne(
+      { _id: report._id },
+      {
+        $set: {
+          agentSwitched: true,
+          previousAgent: switchInfo.previousAgent,
+          newAgent: switchInfo.newAgent,
+          switchedAt: switchInfo.switchedAt,
+          actionsTaken: switchInfo.actions || [],
+          updatedAt: new Date(),
+        },
+        $push: {
+          auditLog: {
+            action: "agent_switched",
+            by: "system",
+            details: {
+              previousAgent: switchInfo.previousAgent,
+              newAgent: switchInfo.newAgent,
+            },
+            timestamp: switchInfo.switchedAt,
+          },
+        },
+      },
+    );
+
+    if (result.modifiedCount > 0) {
+      console.log(
+        `✅ Updated fraud report with agent switch: ${switchInfo.previousAgent} → ${switchInfo.newAgent}`,
+      );
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error(
+      `❌ Failed to update fraud report with agent switch:`,
+      err.message,
+    );
+    return false;
+  }
+}
+
+/**
+ * Update fraud report with additional actions
+ *
+ * @param {string} phoneNumber - User's phone number
+ * @param {array} actions - Actions to add
+ * @returns {Promise<boolean>} Success status
+ */
+async function updateFraudReportActions(phoneNumber, actions) {
+  try {
+    const db = getDb();
+    const collection = db.collection(COLLECTION);
+
+    // Hash phone number to find report
+    const phoneNumberHash = require("crypto")
+      .createHash("sha256")
+      .update(phoneNumber)
+      .digest("hex");
+
+    // Find most recent active report for this user
+    const report = await collection.findOne(
+      { phoneNumberHash, status: "active" },
+      { sort: { createdAt: -1 } },
+    );
+
+    if (!report) {
+      console.warn(`⚠️ No active fraud report found for ${phoneNumber}`);
+      return false;
+    }
+
+    // Append actions
+    const result = await collection.updateOne(
+      { _id: report._id },
+      {
+        $push: { actionsTaken: { $each: actions } },
+        $set: { updatedAt: new Date() },
+      },
+    );
+
+    if (result.modifiedCount > 0) {
+      console.log(`✅ Added ${actions.length} action(s) to fraud report`);
+      return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error(`❌ Failed to update fraud report actions:`, err.message);
+    return false;
+  }
+}
+
+/**
  * Initialize fraud reports collection with indexes
  */
 async function initializeFraudReports() {
@@ -377,6 +499,8 @@ module.exports = {
   getFraudReportsByRiskLevel,
   getAllFraudReports,
   updateFraudReportStatus,
+  updateFraudReportAgentSwitch,
+  updateFraudReportActions,
   getFraudReportStats,
   searchFraudReports,
   deleteFraudReport,

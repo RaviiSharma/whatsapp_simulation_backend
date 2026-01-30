@@ -148,6 +148,7 @@ async function processMessage(message) {
     // STEP 4: AI-based fraud detection (intelligent context-aware)
     // Call AI fraud detection API to analyze message in context
     console.log(`🔍 Running AI fraud detection for: "${text}"`);
+    const fraudDetectionStartTime = Date.now(); // Track detection latency
     let fraudClassification = null;
 
     try {
@@ -181,6 +182,10 @@ async function processMessage(message) {
           },
           timestamp: new Date().toISOString(),
           aiDetected: true,
+          detectionSource: "ai_fraud_engine",
+          detectionLatencyMs: Date.now() - fraudDetectionStartTime,
+          activeAgentAtDetection: agentName, // Agent active when fraud was detected
+          actionsTaken: [], // Will be populated as actions are taken
         };
       } else if (
         aiRiskLevel === "critical" ||
@@ -204,6 +209,13 @@ async function processMessage(message) {
       );
       // Fallback to pattern-based only if AI fails
       fraudClassification = fraudDetection.classifyMessage(text);
+      if (fraudClassification) {
+        fraudClassification.detectionSource = "pattern_matching";
+        fraudClassification.detectionLatencyMs =
+          Date.now() - fraudDetectionStartTime;
+        fraudClassification.activeAgentAtDetection = agentName;
+        fraudClassification.actionsTaken = [];
+      }
     }
 
     if (fraudClassification) {
@@ -217,20 +229,27 @@ async function processMessage(message) {
         agentName,
       );
 
-      // Store conversation snippet for report
-      const conversationSnippet = [text];
+      // Store conversation snippet for report (MASKED)
+      const conversationSnippet = [
+        text
+          .replace(/\b\d{6}\b/g, "****") // Mask OTP
+          .replace(/\b\d{16}\b/g, "****-****-****-****") // Mask card
+          .replace(/\b\d{3}\b/g, "***"), // Mask CVV
+      ];
 
       // Create fraud report in MongoDB
       try {
         await fraudReport.createFraudReport({
           phoneNumber: from,
-          agent: agentName,
+          agent: fraudClassification.activeAgentAtDetection || agentName,
           riskLevel: fraudClassification.riskLevel,
           evidence: fraudClassification.evidence,
           conversationSnippet,
           metadata: {
             detectedAt: new Date(fraudClassification.timestamp),
             messageId,
+            detectionLatencyMs: fraudClassification.detectionLatencyMs || null,
+            detectionSource: fraudClassification.detectionSource || "unknown",
           },
         });
         console.log(`📝 Fraud report created for ${from}`);
@@ -272,6 +291,14 @@ async function processMessage(message) {
         fraudClassification.riskLevel,
       );
 
+      // Track action: User marked as compromised
+      const actionsTaken = [];
+      actionsTaken.push({
+        action: "user_marked_compromised",
+        riskLevel: fraudClassification.riskLevel,
+        timestamp: new Date(),
+      });
+
       // Execute protective action
       if (action.action === "SWITCH_AGENT" && action.targetAgent) {
         console.log(
@@ -279,18 +306,53 @@ async function processMessage(message) {
         );
 
         const previousAgent = agentName;
+        const switchedAt = new Date();
         agentName = action.targetAgent;
+
+        // Track action: Agent switched
+        actionsTaken.push({
+          action: "agent_switched",
+          fromAgent: previousAgent,
+          toAgent: action.targetAgent,
+          reason: "fraud_detection",
+          timestamp: switchedAt,
+        });
 
         // Update session
         await sessionStore.createSession(from, {
           agentName: action.targetAgent,
-          assignedAt: new Date().toISOString(),
-          lastMessageAt: new Date().toISOString(),
+          assignedAt: switchedAt.toISOString(),
+          lastMessageAt: switchedAt.toISOString(),
           messageCount: session?.messageCount || 0,
           isNewUser: false,
           previousAgent,
           switchReason: "fraud_detection",
         });
+
+        // Track action: Conversation restricted
+        if (
+          fraudClassification.riskLevel === "CRITICAL" ||
+          fraudClassification.riskLevel === "HIGH"
+        ) {
+          actionsTaken.push({
+            action: "conversation_restricted",
+            restrictionLevel: fraudClassification.riskLevel,
+            timestamp: new Date(),
+          });
+        }
+
+        // Update fraud report with agent switch info
+        try {
+          await fraudReport.updateFraudReportAgentSwitch(from, {
+            previousAgent,
+            newAgent: action.targetAgent,
+            switchedAt,
+            actions: actionsTaken,
+          });
+          console.log(`📝 Updated fraud report with agent switch info`);
+        } catch (err) {
+          console.error(`⚠️ Failed to update fraud report:`, err.message);
+        }
 
         // Send warning message
         if (action.message) {
@@ -305,6 +367,23 @@ async function processMessage(message) {
       } else if (action.action === "MONITOR" && action.message) {
         // Send warning but continue (for LOW risk on safe agents)
         await sendMessage(from, action.message);
+
+        // Track action: User monitoring activated
+        const actionsTaken = [
+          {
+            action: "monitoring_activated",
+            monitoringLevel: fraudClassification.riskLevel,
+            warningMessage: action.message,
+            timestamp: new Date(),
+          },
+        ];
+
+        // Update fraud report with monitoring action
+        try {
+          await fraudReport.updateFraudReportActions(from, actionsTaken);
+        } catch (err) {
+          console.error(`⚠️ Failed to update fraud report:`, err.message);
+        }
       }
 
       // Block AI generation ONLY if still on hackerAgent after fraud detection

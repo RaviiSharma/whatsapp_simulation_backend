@@ -60,8 +60,8 @@ class FraudReport {
     this.eventCategory = this._determineEventCategory(this.eventType);
 
     // Risk Assessment
-    this.riskScore = this._calculateRiskScore(evidence);
     this.riskLevel = riskLevel; // LOW | MEDIUM | HIGH | CRITICAL
+    this.riskScore = this._calculateRiskScore(evidence, riskLevel); // Must align with riskLevel
     this.compromised = this.riskScore >= 20; // Boolean flag
 
     // Evidence (Masked)
@@ -75,7 +75,8 @@ class FraudReport {
     };
 
     // Detection Context
-    this.detectedAgent = agent;
+    this.activeAgentAtDetection = agent; // Agent active when fraud was detected (not who detected it)
+    this.detectedAgent = agent; // Kept for backwards compatibility - will be deprecated
     this.detectedAt = metadata.detectedAt || new Date();
     this.messageId = metadata.messageId || null;
 
@@ -86,10 +87,15 @@ class FraudReport {
     this.switchedAt = null;
 
     // Escalation Tracking
+    // escalationStatus rules:
+    //   - "urgent": CRITICAL risk, requires immediate SOC review
+    //   - "escalated": HIGH risk, requires analyst assignment within 1 hour
+    //   - "pending": MEDIUM/LOW risk, queued for review
+    // escalatedTo can be: "soc", "security_team", "compliance", "external_authority"
     this.escalationStatus = this._determineEscalationStatus(this.riskLevel);
-    this.escalatedTo = null;
-    this.escalatedAt = null;
-    this.assignedAnalyst = null;
+    this.escalatedTo = null; // Populated by admin or automated workflow
+    this.escalatedAt = null; // Set when escalation occurs
+    this.assignedAnalyst = null; // Human analyst ID or email
 
     // Conversation Context
     this.conversationSnippet = conversationSnippet;
@@ -168,16 +174,43 @@ class FraudReport {
   }
 
   /**
-   * Calculate risk score (0-100)
+   * Calculate risk score (0-100) - must align with riskLevel
    */
-  _calculateRiskScore(evidence) {
-    let score = 0;
-    if (evidence.otp) score += 40;
-    if (evidence.card) score += 50;
-    if (evidence.cvv) score += 30;
-    if (evidence.clickedLink) score += 20;
-    if (evidence.password) score += 45;
-    return Math.min(score, 100);
+  _calculateRiskScore(evidence, riskLevel) {
+    // Start with evidence-based score
+    let evidenceScore = 0;
+    if (evidence.otp) evidenceScore += 40;
+    if (evidence.card) evidenceScore += 50;
+    if (evidence.cvv) evidenceScore += 30;
+    if (evidence.clickedLink) evidenceScore += 20;
+    if (evidence.password) evidenceScore += 45;
+    evidenceScore = Math.min(evidenceScore, 100);
+
+    // Ensure score aligns with riskLevel
+    // CRITICAL: 76-100, HIGH: 51-75, MEDIUM: 21-50, LOW: 0-20
+    const riskLevelScores = {
+      CRITICAL: { min: 76, default: 85 },
+      HIGH: { min: 51, default: 65 },
+      MEDIUM: { min: 21, default: 40 },
+      LOW: { min: 0, default: 15 },
+    };
+
+    const levelRange = riskLevelScores[riskLevel];
+    if (levelRange) {
+      // If evidence score is too low for the risk level, use the default
+      if (evidenceScore < levelRange.min) {
+        return levelRange.default;
+      }
+      // Otherwise use evidence score but ensure it's within range
+      if (riskLevel === "CRITICAL") return Math.max(evidenceScore, 76);
+      if (riskLevel === "HIGH")
+        return Math.max(51, Math.min(evidenceScore, 75));
+      if (riskLevel === "MEDIUM")
+        return Math.max(21, Math.min(evidenceScore, 50));
+      return Math.min(evidenceScore, 20);
+    }
+
+    return evidenceScore;
   }
 
   /**
@@ -244,8 +277,22 @@ class FraudReport {
 
   /**
    * Escalate case
+   *
+   * @param {string} escalatedTo - Target: "soc", "security_team", "compliance", "external_authority"
+   * @param {string} assignedAnalyst - Optional analyst identifier (email/ID)
    */
   escalate(escalatedTo, assignedAnalyst = null) {
+    // Validate escalation target
+    const validTargets = [
+      "soc",
+      "security_team",
+      "compliance",
+      "external_authority",
+    ];
+    if (!validTargets.includes(escalatedTo)) {
+      throw new Error(`escalatedTo must be one of: ${validTargets.join(", ")}`);
+    }
+
     this.escalationStatus = "escalated";
     this.escalatedTo = escalatedTo;
     this.escalatedAt = new Date();

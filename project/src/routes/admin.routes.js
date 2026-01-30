@@ -19,31 +19,278 @@ const redis = require("../config/redis");
 /**
  * GET /admin/stats
  *
- * System-wide statistics
+ * System-wide statistics with proper time scoping and separation of current vs historical data
  */
+// router.get("/stats", async (req, res) => {
+//   try {
+//     const startTime = Date.now();
+
+//     // Get all active sessions
+//     const allSessions = await sessionStore.getAllSessions();
+//     const activeSessionsCount = allSessions.length;
+
+//     // Calculate current active sessions by agent
+//     const currentSessions = {};
+//     allSessions.forEach((session) => {
+//       currentSessions[session.agentName] =
+//         (currentSessions[session.agentName] || 0) + 1;
+//     });
+
+//     // Calculate current distribution (only active sessions)
+//     const currentDistribution = {};
+//     if (activeSessionsCount > 0) {
+//       Object.entries(currentSessions).forEach(([agent, count]) => {
+//         currentDistribution[agent] =
+//           ((count / activeSessionsCount) * 100).toFixed(2) + "%";
+//       });
+//     }
+
+//     // Get historical agent loads (cumulative)
+//     const historicalLoads = await sessionStore.getAllAgentLoads();
+
+//     // Get deduplication stats with more detail
+//     const dedupStats = await deduplication.getStats();
+//     const db = await mongodb.getDatabase();
+
+//     // Calculate dedup effectiveness
+//     const totalProcessed = dedupStats.trackedMessages || 0;
+//     const duplicatesBlocked = 0; // Would need Redis keys to calculate actual blocked count
+
+//     // Get fraud stats
+//     const fraudStats = await fraudReport.getFraudReportStats();
+
+//     // Determine if there are active critical cases requiring attention
+//     const activeCriticalCases = fraudStats.byRiskLevel?.CRITICAL || 0;
+//     const activeHighCases = fraudStats.byRiskLevel?.HIGH || 0;
+//     const requiresImmediateAttention =
+//       activeCriticalCases > 0 || activeHighCases > 0;
+
+//     // System uptime
+//     const uptimeSeconds = Math.floor(process.uptime());
+
+//     res.json({
+//       status: "ok",
+//       timestamp: new Date().toISOString(),
+
+//       // Current active state
+//       currentSessions: {
+//         total: activeSessionsCount,
+//         byAgent: currentSessions,
+//         distribution: currentDistribution,
+//         availableAgents: agentRouter.AVAILABLE_AGENTS,
+//       },
+
+//       // Historical cumulative data
+//       historicalAgentLoads: {
+//         description: "Total assignments since deployment",
+//         byAgent: historicalLoads,
+//       },
+
+//       // Deduplication (time window: 24 hours)
+//       deduplication: {
+//         window: {
+//           type: "rolling",
+//           durationHours: dedupStats.ttlHours,
+//         },
+//         tracked: totalProcessed,
+//         duplicatesBlocked: duplicatesBlocked,
+//         accepted: totalProcessed - duplicatesBlocked,
+//         ttlSeconds: dedupStats.ttl,
+//       },
+
+//       // Fraud detection (time window: last 24 hours)
+//       fraud: {
+//         window: {
+//           type: "rolling",
+//           durationHours: 24,
+//         },
+//         ...fraudStats,
+//         alerts: {
+//           requiresImmediateAttention,
+//           activeCriticalCases,
+//           activeHighCases,
+//           message: requiresImmediateAttention
+//             ? `⚠️ ${activeCriticalCases} CRITICAL and ${activeHighCases} HIGH risk cases require immediate review`
+//             : "No urgent cases",
+//         },
+//       },
+
+//       // System health
+//       system: {
+//         uptimeSeconds,
+//         uptimeFormatted: formatUptime(uptimeSeconds),
+//         responseTimeMs: Date.now() - startTime,
+//       },
+
+//       // Storage status
+//       storage: {
+//         mongodb: mongodb.getStatus(),
+//         redis: redis.getStatus(),
+//       },
+//     });
+//   } catch (err) {
+//     console.error("❌ Admin stats failed:", err.message);
+//     res.status(500).json({
+//       error: err.message,
+//       timestamp: new Date().toISOString(),
+//     });
+//   }
+// });
+
 router.get("/stats", async (req, res) => {
   try {
-    const routingStats = await agentRouter.getRoutingStats();
+    const startTime = Date.now();
+
+    /* =========================
+       LIVE ACTIVE SESSIONS
+    ========================== */
+
+    const allSessions = await sessionStore.getAllSessions();
+    const activeSessionsCount = allSessions.length;
+
+    // Count active sessions by agent
+    const activeSessionsByAgent = {};
+    for (const session of allSessions) {
+      const agent = session.agentName || "unknown";
+      activeSessionsByAgent[agent] =
+        (activeSessionsByAgent[agent] || 0) + 1;
+    }
+
+    // Percentage distribution (LIVE only)
+    const activeDistribution = {};
+    if (activeSessionsCount > 0) {
+      for (const [agent, count] of Object.entries(activeSessionsByAgent)) {
+        activeDistribution[agent] =
+          ((count / activeSessionsCount) * 100).toFixed(2) + "%";
+      }
+    }
+
+    /* =========================
+       HISTORICAL AGENT LOADS
+    ========================== */
+
+    // Cumulative assignments since deployment
+    const historicalAgentLoads = await sessionStore.getAllAgentLoads();
+
+    /* =========================
+       DEDUPLICATION STATS
+    ========================== */
+
     const dedupStats = await deduplication.getStats();
+    const totalProcessed = dedupStats?.trackedMessages || 0;
+
+    // NOTE: true blocked count would require Redis inspection
+    const duplicatesBlocked = 0;
+
+    /* =========================
+       FRAUD STATS (LAST 24H)
+    ========================== */
+
     const fraudStats = await fraudReport.getFraudReportStats();
+
+    const activeCriticalCases = fraudStats?.byRiskLevel?.CRITICAL || 0;
+    const activeHighCases = fraudStats?.byRiskLevel?.HIGH || 0;
+
+    const requiresImmediateAttention =
+      activeCriticalCases > 0 || activeHighCases > 0;
+
+    /* =========================
+       SYSTEM HEALTH
+    ========================== */
+
+    const uptimeSeconds = Math.floor(process.uptime());
+
+    /* =========================
+       RESPONSE
+    ========================== */
 
     res.json({
       status: "ok",
       timestamp: new Date().toISOString(),
-      routing: routingStats,
-      deduplication: dedupStats,
-      fraud: fraudStats,
+
+      // 🔴 LIVE STATE (REAL-TIME)
+      currentSessions: {
+        total: activeSessionsCount,
+        byAgent: activeSessionsByAgent,
+        distribution: activeDistribution,
+        availableAgents: agentRouter.AVAILABLE_AGENTS,
+      },
+
+      // 🟢 HISTORICAL (CUMULATIVE)
+      historicalAgentLoads: {
+        description: "Total agent assignments since deployment",
+        byAgent: historicalAgentLoads,
+      },
+
+      // ♻️ DEDUPLICATION (24H WINDOW)
+      deduplication: {
+        window: {
+          type: "rolling",
+          durationHours: dedupStats?.ttlHours || 24,
+        },
+        tracked: totalProcessed,
+        duplicatesBlocked,
+        accepted: totalProcessed - duplicatesBlocked,
+        ttlSeconds: dedupStats?.ttl || 86400,
+      },
+
+      // 🚨 FRAUD DETECTION
+      fraud: {
+        window: {
+          type: "rolling",
+          durationHours: 24,
+        },
+        ...fraudStats,
+        alerts: {
+          requiresImmediateAttention,
+          activeCriticalCases,
+          activeHighCases,
+          message: requiresImmediateAttention
+            ? `⚠️ ${activeCriticalCases} CRITICAL and ${activeHighCases} HIGH risk cases require immediate review`
+            : "No urgent cases",
+        },
+      },
+
+      // 🩺 SYSTEM
+      system: {
+        uptimeSeconds,
+        uptimeFormatted: formatUptime(uptimeSeconds),
+        responseTimeMs: Date.now() - startTime,
+      },
+
+      // 💾 STORAGE
       storage: {
         mongodb: mongodb.getStatus(),
         redis: redis.getStatus(),
       },
     });
   } catch (err) {
+    console.error("❌ /stats failed:", err);
     res.status(500).json({
-      error: err.message,
+      status: "error",
+      message: err.message,
+      timestamp: new Date().toISOString(),
     });
   }
 });
+
+/**
+ * Format uptime into human-readable string
+ */
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+
+  return parts.join(" ");
+}
 
 /**
  * GET /admin/agents
