@@ -90,11 +90,23 @@ exports.generateAgentMessage = async (userId, text, agentName) => {
       { timeout: 25000 },
     );
 
-    if (!res.data || !res.data.hackerMessage) {
+    if (!res.data) {
       throw new Error("Invalid generate API response format");
     }
 
-    return res.data.hackerMessage;
+    // Try multiple field names for different agents
+    const message =
+      res.data.message ||
+      res.data.hackerMessage ||
+      res.data.riskMessage ||
+      res.data.policyMessage ||
+      res.data.benignMessage;
+
+    if (!message) {
+      throw new Error("No message field found in AI response");
+    }
+
+    return message;
   } catch (err) {
     handleAxiosError("Generate API", err);
 
@@ -189,19 +201,19 @@ function handleAxiosError(serviceName, err) {
     const status = err.response.status;
 
     if (status === 429) {
-      console.error(`🚫 ${serviceName} rate limit exceeded (429)`);
+      console.error(` ${serviceName} rate limit exceeded (429)`);
     } else if (status >= 500) {
-      console.error(`❌ ${serviceName} server error (${status})`);
+      console.error(` ${serviceName} server error (${status})`);
     } else if (status >= 400) {
       console.error(
-        `❌ ${serviceName} client error (${status}):`,
+        ` ${serviceName} client error (${status}):`,
         err.response.data,
       );
     }
   } else if (err.request) {
-    console.error(`❌ ${serviceName} no response (network error)`);
+    console.error(` ${serviceName} no response (network error)`);
   } else {
-    console.error(`❌ ${serviceName} error:`, err.message);
+    console.error(` ${serviceName} error:`, err.message);
   }
 }
 

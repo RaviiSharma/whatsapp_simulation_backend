@@ -375,6 +375,13 @@ function getDb() {
   return db;
 }
 
+/**
+ * Get database instance (alias for compatibility)
+ */
+function getDatabase() {
+  return getDb();
+}
+
 module.exports = {
   connectMongo,
   getSession,
@@ -391,4 +398,5 @@ module.exports = {
   close,
   getStatus,
   getDb,
+  getDatabase,
 };

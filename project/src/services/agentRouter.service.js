@@ -26,7 +26,7 @@ const ALL_AGENTS = ["hackerAgent", "benignAgent", "policyAgent", "riskAgent"];
  */
 function getAvailableAgents() {
   if (isProduction()) {
-    console.log("⚠️ PRODUCTION MODE: hackerAgent disabled");
+    console.log(" PRODUCTION MODE: hackerAgent disabled");
     return ALL_AGENTS.filter((agent) => agent !== "hackerAgent");
   }
   return ALL_AGENTS;
@@ -51,7 +51,7 @@ async function getOrAssignAgent(userId) {
 
     if (existingSession) {
       console.log(
-        `🎯 User ${userId} already assigned to ${existingSession.agentName}`,
+        ` User ${userId} already assigned to ${existingSession.agentName}`,
       );
       return {
         agentName: existingSession.agentName,
@@ -62,18 +62,18 @@ async function getOrAssignAgent(userId) {
     // New user - assign agent using load balancing
     const assignedAgent = await assignAgent(userId);
 
-    console.log(`🆕 New user ${userId} assigned to ${assignedAgent}`);
+    console.log(` New user ${userId} assigned to ${assignedAgent}`);
     return {
       agentName: assignedAgent,
       isNewUser: true,
     };
   } catch (err) {
-    console.error(`❌ Agent routing failed for ${userId}:`, err.message);
+    console.error(` Agent routing failed for ${userId}:`, err.message);
 
     // Fallback: assign random agent
     const fallbackAgent =
       AVAILABLE_AGENTS[Math.floor(Math.random() * AVAILABLE_AGENTS.length)];
-    console.warn(`⚠️ Using fallback agent: ${fallbackAgent}`);
+    console.warn(` Using fallback agent: ${fallbackAgent}`);
 
     return {
       agentName: fallbackAgent,
@@ -96,7 +96,7 @@ async function assignAgent(userId) {
 
     // PRODUCTION SAFETY: Force benignAgent in production
     if (isProduction()) {
-      console.log(`🛡️ PRODUCTION MODE: Forcing benignAgent`);
+      console.log(` PRODUCTION MODE: Forcing benignAgent`);
       return "benignAgent";
     }
 
@@ -118,15 +118,15 @@ async function assignAgent(userId) {
     console.log(
       `⚖️ Load balancing: Selected ${selectedAgent} (load: ${minLoad}) [${NODE_ENV}]`,
     );
-    console.log(`📊 Current loads:`, agentLoads);
+    console.log(` Current loads:`, agentLoads);
 
     return selectedAgent;
   } catch (err) {
-    console.error(`❌ Agent assignment failed for ${userId}:`, err.message);
+    console.error(` Agent assignment failed for ${userId}:`, err.message);
 
     // Fallback to benignAgent (safest option)
     const fallbackAgent = "benignAgent";
-    console.warn(`⚠️ Using fallback agent: ${fallbackAgent}`);
+    console.warn(` Using fallback agent: ${fallbackAgent}`);
 
     return fallbackAgent;
   }
@@ -167,7 +167,7 @@ async function routeMessage(userId, message) {
       context: getAgentContext(agentName),
     };
   } catch (err) {
-    console.error(`❌ Message routing failed for ${userId}:`, err.message);
+    console.error(` Message routing failed for ${userId}:`, err.message);
     throw err;
   }
 }
@@ -187,21 +187,21 @@ function getAgentContext(agentName) {
       personality: "suspicious, technical, probing",
       goal: "extract information, social engineering",
       introMessage:
-        "🔓 Hey there! I noticed your account activity. Quick security check needed.",
+        " Hey there! I noticed your account activity. Quick security check needed.",
     },
     benignAgent: {
       role: "friendly_user",
       personality: "helpful, casual, trustworthy",
       goal: "normal conversation, build rapport",
       introMessage:
-        "👋 Hi! Thanks for connecting with us. How can I help you today?",
+        " Hi! Thanks for connecting with us. How can I help you today?",
     },
     policyAgent: {
       role: "policy_enforcer",
       personality: "formal, rule-based, strict",
       goal: "verify compliance, enforce policies",
       introMessage:
-        "📋 Hello. This is a routine policy verification check. Please respond to continue.",
+        " Hello. This is a routine policy verification check. Please respond to continue.",
     },
     riskAgent: {
       role: "security_educator",
@@ -210,7 +210,7 @@ function getAgentContext(agentName) {
       systemPrompt:
         "You are a security awareness educator. The user was just in a simulated phishing scenario and may have shared sensitive information. Be TRANSPARENT - explain this was a security training test. Be CALM - no urgency or fear. EDUCATE about security best practices. NEVER manipulate, deceive, or use social engineering. NEVER impersonate organizations. NEVER ask for sensitive info. Speak honestly and clearly. Example: 'I want to help you understand what just happened. This was a security awareness simulation. Sharing OTPs or passwords can put your account at risk. Real companies never ask for these via chat. Let me explain how to stay safe...'",
       introMessage:
-        "👋 Hi, I'm a security educator here to help you understand online safety. Let's talk about keeping your information secure.",
+        " Hi, I'm a security educator here to help you understand online safety. Let's talk about keeping your information secure.",
     },
   };
 
@@ -235,7 +235,7 @@ async function getRoutingStats() {
       ),
     };
   } catch (err) {
-    console.error("❌ Failed to get routing stats:", err.message);
+    console.error(" Failed to get routing stats:", err.message);
     return {
       error: err.message,
     };
@@ -273,7 +273,7 @@ async function reassignAgent(userId, newAgentName) {
   // PRODUCTION SAFETY: Block hackerAgent reassignment in production
   if (isProduction() && newAgentName === "hackerAgent") {
     console.log(
-      `⚠️ PRODUCTION MODE: Cannot reassign to hackerAgent. Using benignAgent instead.`,
+      ` PRODUCTION MODE: Cannot reassign to hackerAgent. Using benignAgent instead.`,
     );
     newAgentName = "benignAgent";
   }
@@ -297,7 +297,7 @@ async function reassignAgent(userId, newAgentName) {
     previousAgent: oldAgent,
   });
 
-  console.log(`🔄 Reassigned ${userId}: ${oldAgent} → ${newAgentName}`);
+  console.log(` Reassigned ${userId}: ${oldAgent} → ${newAgentName}`);
   return true;
 }
 
@@ -331,9 +331,9 @@ async function getSession(userId) {
 async function updateSessionNewUserFlag(userId, isNewUser) {
   try {
     await sessionStore.updateSession(userId, { isNewUser });
-    console.log(`🔄 Updated isNewUser flag for ${userId}: ${isNewUser}`);
+    console.log(` Updated isNewUser flag for ${userId}: ${isNewUser}`);
   } catch (err) {
-    console.error(`❌ Failed to update isNewUser flag: ${err.message}`);
+    console.error(` Failed to update isNewUser flag: ${err.message}`);
   }
 }
 

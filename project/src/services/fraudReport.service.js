@@ -27,7 +27,7 @@ async function createFraudReport(reportData) {
     const result = await collection.insertOne(report.toDocument());
 
     console.log(
-      `🚨 Fraud report created: ${report.caseId} (${report.riskLevel}) - ID: ${result.insertedId}`,
+      ` Fraud report created: ${report.caseId} (${report.riskLevel}) - ID: ${result.insertedId}`,
     );
 
     return {
@@ -35,7 +35,7 @@ async function createFraudReport(reportData) {
       _id: result.insertedId,
     };
   } catch (err) {
-    console.error(`❌ Failed to create fraud report:`, err.message);
+    console.error(` Failed to create fraud report:`, err.message);
     throw err;
   }
 }
@@ -56,7 +56,7 @@ async function getFraudReport(reportId) {
 
     return FraudReport.fromDocument(doc);
   } catch (err) {
-    console.error(`❌ Failed to get fraud report ${reportId}:`, err.message);
+    console.error(` Failed to get fraud report ${reportId}:`, err.message);
     return null;
   }
 }
@@ -82,7 +82,7 @@ async function getFraudReportsByPhone(phoneNumber, limit = 10) {
     return docs.map((doc) => FraudReport.fromDocument(doc));
   } catch (err) {
     console.error(
-      `❌ Failed to get fraud reports for ${phoneNumber}:`,
+      ` Failed to get fraud reports for ${phoneNumber}:`,
       err.message,
     );
     return [];
@@ -110,7 +110,7 @@ async function getFraudReportsByStatus(status, limit = 50) {
     return docs.map((doc) => FraudReport.fromDocument(doc));
   } catch (err) {
     console.error(
-      `❌ Failed to get fraud reports by status ${status}:`,
+      ` Failed to get fraud reports by status ${status}:`,
       err.message,
     );
     return [];
@@ -138,7 +138,7 @@ async function getFraudReportsByRiskLevel(riskLevel, limit = 50) {
     return docs.map((doc) => FraudReport.fromDocument(doc));
   } catch (err) {
     console.error(
-      `❌ Failed to get fraud reports by risk level ${riskLevel}:`,
+      ` Failed to get fraud reports by risk level ${riskLevel}:`,
       err.message,
     );
     return [];
@@ -164,7 +164,7 @@ async function getAllFraudReports(limit = 50) {
 
     return docs.map((doc) => FraudReport.fromDocument(doc));
   } catch (err) {
-    console.error(`❌ Failed to get all fraud reports:`, err.message);
+    console.error(` Failed to get all fraud reports:`, err.message);
     return [];
   }
 }
@@ -206,14 +206,14 @@ async function updateFraudReportStatus(
     );
 
     if (result.matchedCount === 0) {
-      console.warn(`⚠️ Fraud report ${reportId} not found`);
+      console.warn(` Fraud report ${reportId} not found`);
       return false;
     }
 
-    console.log(`✅ Fraud report ${reportId} updated to status: ${status}`);
+    console.log(` Fraud report ${reportId} updated to status: ${status}`);
     return true;
   } catch (err) {
-    console.error(`❌ Failed to update fraud report ${reportId}:`, err.message);
+    console.error(` Failed to update fraud report ${reportId}:`, err.message);
     return false;
   }
 }
@@ -282,7 +282,7 @@ async function getFraudReportStats() {
       timestamp: new Date().toISOString(),
     };
   } catch (err) {
-    console.error(`❌ Failed to get fraud report stats:`, err.message);
+    console.error(` Failed to get fraud report stats:`, err.message);
     return {
       total: 0,
       byStatus: {},
@@ -313,7 +313,7 @@ async function searchFraudReports(query, limit = 50) {
 
     return docs.map((doc) => FraudReport.fromDocument(doc));
   } catch (err) {
-    console.error(`❌ Failed to search fraud reports:`, err.message);
+    console.error(` Failed to search fraud reports:`, err.message);
     return [];
   }
 }
@@ -333,14 +333,14 @@ async function deleteFraudReport(reportId) {
     const result = await collection.deleteOne({ _id: new ObjectId(reportId) });
 
     if (result.deletedCount === 0) {
-      console.warn(`⚠️ Fraud report ${reportId} not found`);
+      console.warn(` Fraud report ${reportId} not found`);
       return false;
     }
 
-    console.log(`✅ Fraud report ${reportId} deleted`);
+    console.log(` Fraud report ${reportId} deleted`);
     return true;
   } catch (err) {
-    console.error(`❌ Failed to delete fraud report ${reportId}:`, err.message);
+    console.error(` Failed to delete fraud report ${reportId}:`, err.message);
     return false;
   }
 }
@@ -363,9 +363,9 @@ async function initializeFraudReports() {
     // Compound index for common queries
     await collection.createIndex({ status: 1, riskLevel: 1 });
 
-    console.log("✅ Fraud reports collection initialized");
+    console.log(" Fraud reports collection initialized");
   } catch (err) {
-    console.error(`❌ Failed to initialize fraud reports:`, err.message);
+    console.error(` Failed to initialize fraud reports:`, err.message);
   }
 }
 

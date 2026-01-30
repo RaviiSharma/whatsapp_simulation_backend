@@ -13,6 +13,7 @@ const deduplication = require("../utils/deduplication");
 const fraudDetection = require("./fraudDetection.service");
 const fraudReport = require("./fraudReport.service");
 const sessionWindow = require("./sessionWindow.service");
+const chatHistory = require("./chatHistory.service");
 
 /**
  * Main message processing pipeline
@@ -89,43 +90,40 @@ async function processMessage(message) {
 
     console.log(`🎯 Routed to: ${agentName} (new: ${isNewUser})`);
 
-    // STEP 2.5: Check if user is compromised (NOW agentName is initialized)
-    const compromisedStatus = await fraudDetection.isUserCompromised(from);
-    if (compromisedStatus) {
-      console.log(
-        `🚨 User ${from} is flagged as compromised (${compromisedStatus.riskLevel})`,
-      );
+    // STEP 2.3: Store inbound message to MongoDB chat history
+    let campaignId = session?.campaignId || null;
+    // Normalize campaignId: treat 'direct' or empty string as null
+    if (campaignId === "direct" || campaignId === "") {
+      campaignId = null;
+    }
+    const campaignName = session?.campaignName || null;
 
-      // IMMEDIATE ACTION: Block hackerAgent, force riskAgent
-      if (agentName === "hackerAgent") {
-        console.log(`🛑 STOPPING hackerAgent for compromised user ${from}`);
-
-        // Switch to riskAgent immediately
-        agentName = "riskAgent";
-        await sessionStore.createSession(from, {
-          agentName: "riskAgent",
-          assignedAt: new Date().toISOString(),
-          lastMessageAt: new Date().toISOString(),
-          messageCount: session?.messageCount || 0,
-          isNewUser: false,
-        });
-
-        // Send security alert and STOP processing
-        await sendMessage(
-          from,
-          "⚠️ Security alert: suspicious activity detected. A security specialist will assist you.",
-        );
-
-        console.log(
-          `🔄 Switched compromised user to riskAgent - BLOCKING further processing`,
-        );
-        logMetrics("compromised_blocked", startTime);
-        return; // Stop processing immediately
-      }
-
-      console.log(
-        `ℹ️ Compromised user on ${agentName} - continuing with monitoring`,
-      );
+    try {
+      await chatHistory.storeInboundMessage({
+        campaignId,
+        phoneNumber: from,
+        messageId,
+        text,
+        timestamp: new Date(),
+        agentName,
+        metadata: {
+          campaignName,
+          fraudFlag: false,
+          riskLevel: "low",
+          fraudReasons: [],
+          fraudConfidence: 0.0,
+          proactive: false,
+          isNewUser,
+          messageNumber: session?.messageCount || 1,
+          sessionStartedAt: session?.assignedAt
+            ? new Date(session.assignedAt)
+            : new Date(),
+        },
+      });
+      console.log(`💾 Inbound message stored to chat history`);
+    } catch (err) {
+      console.error(`⚠️ Failed to store inbound message:`, err.message);
+      // Don't fail processing if chat history storage fails
     }
 
     // STEP 3: Handle new user - send intro message FIRST
@@ -147,12 +145,70 @@ async function processMessage(message) {
       }
     }
 
-    // STEP 4: Fraud detection and classification
-    const fraudClassification = fraudDetection.classifyMessage(text);
+    // STEP 4: AI-based fraud detection (intelligent context-aware)
+    // Call AI fraud detection API to analyze message in context
+    console.log(`🔍 Running AI fraud detection for: "${text}"`);
+    let fraudClassification = null;
+
+    try {
+      const aiFraudCheck = await aiService.checkFraud(from, text, agentName);
+
+      // Extract risk level from AI response
+      const aiRiskLevel = aiFraudCheck?.risk?.risk_level?.toLowerCase();
+
+      // IMPORTANT: Verify current message actually contains sensitive data
+      // Don't rely solely on AI state - check pattern in current message too
+      const patternDetection = fraudDetection.classifyMessage(text);
+      const hasSensitiveData = patternDetection !== null;
+
+      // Only process if AI detected fraud AND current message has sensitive data
+      // This prevents false positives from AI session state
+      if (
+        (aiRiskLevel === "critical" ||
+          aiRiskLevel === "high" ||
+          aiRiskLevel === "medium") &&
+        hasSensitiveData
+      ) {
+        console.log(`🚨 AI FRAUD DETECTED: ${aiRiskLevel} risk - ${from}`);
+        console.log(`✅ Verified: Current message contains sensitive data`);
+
+        fraudClassification = {
+          riskLevel: aiRiskLevel.toUpperCase(),
+          evidence: patternDetection.evidence || {
+            description:
+              aiFraudCheck?.risk?.reasons?.join(", ") ||
+              "AI detected suspicious behavior",
+          },
+          timestamp: new Date().toISOString(),
+          aiDetected: true,
+        };
+      } else if (
+        aiRiskLevel === "critical" ||
+        aiRiskLevel === "high" ||
+        aiRiskLevel === "medium"
+      ) {
+        // AI flagged but no sensitive data in current message
+        console.log(
+          `⚠️ AI flagged ${aiRiskLevel} risk but no sensitive data in current message: "${text}"`,
+        );
+        console.log(`✅ Ignoring AI false positive - continuing normally`);
+      } else {
+        console.log(
+          `✅ AI fraud check passed - ${aiRiskLevel || "low"} risk (no action needed)`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        `⚠️ AI fraud detection failed, falling back to pattern-based:`,
+        err.message,
+      );
+      // Fallback to pattern-based only if AI fails
+      fraudClassification = fraudDetection.classifyMessage(text);
+    }
 
     if (fraudClassification) {
       console.log(
-        `🚨 FRAUD DETECTED: ${fraudClassification.riskLevel} - ${from}`,
+        `🚨 FRAUD CONFIRMED: ${fraudClassification.riskLevel} - ${from}`,
       );
 
       // Get protective action based on risk level
@@ -180,6 +236,34 @@ async function processMessage(message) {
         console.log(`📝 Fraud report created for ${from}`);
       } catch (err) {
         console.error(`❌ Failed to create fraud report:`, err.message);
+      }
+
+      // Update fraud status in chat history (message-level)
+      try {
+        await chatHistory.updateMessageFraudStatus(messageId, {
+          fraudDetected: true,
+          riskLevel: fraudClassification.riskLevel,
+          reasons: fraudClassification.evidence,
+          confidence: 0.85,
+        });
+        console.log(`💾 Updated message fraud status in chat history`);
+      } catch (err) {
+        console.error(`⚠️ Failed to update message fraud status:`, err.message);
+      }
+
+      // Mark conversation as fraud (conversation-level)
+      try {
+        await chatHistory.markConversationFraud(campaignId, from, {
+          riskLevel: fraudClassification.riskLevel,
+          confidence: 0.85,
+          reasons: fraudClassification.evidence,
+          blockedUser:
+            fraudClassification.riskLevel === "CRITICAL" ||
+            fraudClassification.riskLevel === "HIGH",
+        });
+        console.log(`🚨 Marked conversation as fraud for ${from}`);
+      } catch (err) {
+        console.error(`⚠️ Failed to mark conversation fraud:`, err.message);
       }
 
       // Mark user as compromised in Redis
@@ -213,51 +297,37 @@ async function processMessage(message) {
           await sendMessage(from, action.message);
         }
 
-        // CRITICAL FIX: If switching FROM hackerAgent, STOP processing immediately
-        // Do NOT generate hackerAgent reply after fraud detection
-        if (previousAgent === "hackerAgent") {
-          console.log(
-            `🛑 BLOCKING hackerAgent reply after fraud detection - switched to ${action.targetAgent}`,
-          );
-          logMetrics("fraud_blocked_hacker_switched", startTime);
-          return; // Exit early - no AI reply
-        }
+        // IMPORTANT: Agent is now switched to riskAgent
+        // Continue processing so riskAgent can respond
+        console.log(
+          `✅ Agent switched from ${previousAgent} to ${action.targetAgent} - continuing with ${action.targetAgent} reply`,
+        );
       } else if (action.action === "MONITOR" && action.message) {
         // Send warning but continue (for LOW risk on safe agents)
         await sendMessage(from, action.message);
       }
 
-      // For CRITICAL/HIGH/MEDIUM risk on any sensitive data, block AI generation
+      // Block AI generation ONLY if still on hackerAgent after fraud detection
+      // Allow riskAgent to respond even during fraud scenarios
       if (
-        fraudClassification.riskLevel === "CRITICAL" ||
-        fraudClassification.riskLevel === "HIGH" ||
-        fraudClassification.riskLevel === "MEDIUM"
+        (fraudClassification.riskLevel === "CRITICAL" ||
+          fraudClassification.riskLevel === "HIGH" ||
+          fraudClassification.riskLevel === "MEDIUM") &&
+        agentName === "hackerAgent"
       ) {
         console.log(
-          `🛑 Blocking AI generation for ${fraudClassification.riskLevel} risk - sensitive data detected`,
+          `🛑 Blocking hackerAgent for ${fraudClassification.riskLevel} risk - should have been switched`,
         );
-        logMetrics("fraud_blocked", startTime);
-        return; // Exit early - no AI reply
+        logMetrics("fraud_blocked_hacker_not_switched", startTime);
+        return; // Exit early - safety check
       }
-    }
 
-    // STEP 4.5: Production safety check
-    const safetyEnforcement = await fraudDetection.enforceProductionSafety(
-      from,
-      agentName,
-    );
-    if (safetyEnforcement.enforced) {
-      console.log(
-        `🛡️ PRODUCTION SAFETY: Enforcing agent switch to ${safetyEnforcement.targetAgent}`,
-      );
-      agentName = safetyEnforcement.targetAgent;
-      await sessionStore.createSession(from, {
-        agentName: safetyEnforcement.targetAgent,
-        assignedAt: new Date().toISOString(),
-        lastMessageAt: new Date().toISOString(),
-        messageCount: 0,
-        isNewUser: false,
-      });
+      // If we reach here with riskAgent, allow them to handle the fraud scenario
+      if (fraudClassification && agentName === "riskAgent") {
+        console.log(
+          `✅ riskAgent handling ${fraudClassification.riskLevel} risk scenario`,
+        );
+      }
     }
 
     // STEP 5: Generate reply from assigned AGENT (not fraud detection)
@@ -269,7 +339,41 @@ async function processMessage(message) {
     );
 
     // STEP 6: Send reply to WhatsApp
-    await sendMessage(from, aiReply);
+    const sentResult = await sendMessage(from, aiReply);
+    const outboundMessageId = sentResult?.messageId || `msg_${Date.now()}`;
+
+    // STEP 6.5: Store outbound message to MongoDB chat history
+    try {
+      await chatHistory.storeOutboundMessage({
+        campaignId,
+        phoneNumber: from,
+        messageId: outboundMessageId,
+        text: aiReply,
+        timestamp: new Date(),
+        agentName,
+        metadata: {
+          campaignName,
+          fraudFlag: false,
+          riskLevel: "low",
+          proactive: false,
+          aiMetadata: {
+            model: "gpt-4",
+            tokensUsed: aiReply.length, // Approximate
+            latencyMs: Date.now() - startTime,
+            context: `${agentName}_context`,
+          },
+          isNewUser: false,
+          messageNumber: (session?.messageCount || 1) + 1,
+          sessionStartedAt: session?.assignedAt
+            ? new Date(session.assignedAt)
+            : new Date(),
+        },
+      });
+      console.log(`💾 Outbound message stored to chat history`);
+    } catch (err) {
+      console.error(`⚠️ Failed to store outbound message:`, err.message);
+      // Don't fail processing if chat history storage fails
+    }
 
     logMetrics("success", startTime);
     console.log(

@@ -14,6 +14,7 @@ const agentRouter = require("./agentRouter.service");
 const sessionStore = require("./sessionStore.service");
 const whatsappService = require("./whatsapp.service");
 const aiService = require("./ai.service");
+const chatHistory = require("./chatHistory.service");
 const { isProduction } = require("../config/env");
 
 /**
@@ -125,7 +126,40 @@ async function startConversation(
 
     console.log(`✅ Proactive conversation started with ${phoneNumber}`);
 
-    // STEP 5: Return success with agent context
+    // STEP 5: Store proactive template message to chat history
+    try {
+      let campaignId = templateParams.campaignId || null;
+      // Normalize campaignId: treat 'direct' or empty string as null
+      if (campaignId === "direct" || campaignId === "") {
+        campaignId = null;
+      }
+
+      await chatHistory.storeProactiveMessage({
+        campaignId,
+        phoneNumber,
+        messageId: templateResult.messageId,
+        templateName: templateParams.templateName || "default_template",
+        templateParams,
+        text: templateParams.templateText || `Template message sent`,
+        timestamp: new Date(),
+        agentName,
+        metadata: {
+          campaignName: templateParams.campaignName || null,
+          fraudFlag: false,
+          riskLevel: "low",
+          status: "sent",
+          isNewUser: true,
+          messageNumber: 1,
+          sessionStartedAt: new Date(),
+        },
+      });
+      console.log(`💾 Proactive template message stored to chat history`);
+    } catch (err) {
+      console.error(`⚠️ Failed to store proactive message:`, err.message);
+      // Don't fail if chat history storage fails
+    }
+
+    // STEP 6: Return success with agent context
     return {
       success: true,
       agentName,

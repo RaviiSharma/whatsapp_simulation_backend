@@ -18,12 +18,12 @@ async function getSession(userId) {
     const session = await mongodb.getSession(userId);
 
     if (session) {
-      console.log(`📖 Retrieved session for ${userId}: ${session.agentName}`);
+      console.log(` Retrieved session for ${userId}: ${session.agentName}`);
     }
 
     return session;
   } catch (err) {
-    console.error(`❌ Failed to get session for ${userId}:`, err.message);
+    console.error(` Failed to get session for ${userId}:`, err.message);
     return null;
   }
 }
@@ -72,16 +72,16 @@ async function createSession(userId, agentNameOrSession) {
       await mongodb.incrementAgentLoad(session.agentName);
     } catch (loadErr) {
       console.warn(
-        `⚠️ Failed to increment agent load for ${session.agentName}:`,
+        ` Failed to increment agent load for ${session.agentName}:`,
         loadErr.message,
       );
       // Don't fail the entire operation - session is already saved
     }
 
-    console.log(`✅ Created session for ${userId} → ${session.agentName}`);
+    console.log(` Created session for ${userId} → ${session.agentName}`);
     return session;
   } catch (err) {
-    console.error(`❌ Failed to create session for ${userId}:`, err.message);
+    console.error(` Failed to create session for ${userId}:`, err.message);
     throw err;
   }
 }
@@ -98,7 +98,7 @@ async function updateSession(userId, updates) {
     const session = await mongodb.getSession(userId);
 
     if (!session) {
-      console.warn(`⚠️ Attempted to update non-existent session: ${userId}`);
+      console.warn(` Attempted to update non-existent session: ${userId}`);
       return;
     }
 
@@ -109,9 +109,9 @@ async function updateSession(userId, updates) {
     };
 
     await mongodb.setSession(userId, updatedSession);
-    console.log(`🔄 Updated session for ${userId}`);
+    console.log(` Updated session for ${userId}`);
   } catch (err) {
-    console.error(`❌ Failed to update session for ${userId}:`, err.message);
+    console.error(` Failed to update session for ${userId}:`, err.message);
   }
 }
 
@@ -127,7 +127,7 @@ async function hasSession(userId) {
     return session !== null;
   } catch (err) {
     console.error(
-      `❌ Failed to check session existence for ${userId}:`,
+      ` Failed to check session existence for ${userId}:`,
       err.message,
     );
     return false;
@@ -155,7 +155,7 @@ async function getAgentLoad(agentName) {
   try {
     return await mongodb.getAgentLoad(agentName);
   } catch (err) {
-    console.error(`❌ Failed to get load for ${agentName}:`, err.message);
+    console.error(` Failed to get load for ${agentName}:`, err.message);
     return 0;
   }
 }
@@ -169,7 +169,7 @@ async function getAllAgentLoads() {
   try {
     return await mongodb.getAllAgentLoads();
   } catch (err) {
-    console.error("❌ Failed to get all agent loads:", err.message);
+    console.error(" Failed to get all agent loads:", err.message);
     return {};
   }
 }
@@ -191,7 +191,7 @@ async function incrementMessageCount(userId) {
     }
   } catch (err) {
     console.error(
-      `❌ Failed to increment message count for ${userId}:`,
+      ` Failed to increment message count for ${userId}:`,
       err.message,
     );
   }
@@ -213,7 +213,7 @@ async function getStats() {
       storageStatus: mongodb.getStatus(),
     };
   } catch (err) {
-    console.error("❌ Failed to get stats:", err.message);
+    console.error(" Failed to get stats:", err.message);
     return {
       totalUsers: 0,
       agentLoads: {},
@@ -233,7 +233,7 @@ async function clearSession(userId) {
     await mongodb.deleteSession(userId);
     console.log(`🗑️ Cleared session for ${userId}`);
   } catch (err) {
-    console.error(`❌ Failed to clear session for ${userId}:`, err.message);
+    console.error(` Failed to clear session for ${userId}:`, err.message);
   }
 }
 
@@ -256,7 +256,7 @@ async function getAllSessions() {
   try {
     return await mongodb.getAllSessions();
   } catch (err) {
-    console.error("❌ Failed to get all sessions:", err.message);
+    console.error(" Failed to get all sessions:", err.message);
     return [];
   }
 }

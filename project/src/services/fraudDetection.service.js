@@ -15,8 +15,9 @@ const { isProduction } = require("../config/env");
  * CRITICAL: These patterns must be precise to avoid false positives
  */
 const PATTERNS = {
-  // OTP: 4-8 consecutive digits (stricter to avoid false positives like "hi")
-  OTP: /\b\d{4,8}\b/g,
+  // OTP: Look for patterns that indicate OTP sharing
+  // Must have context words like "otp", "code", "verification", "pin" OR be exactly 6 digits
+  OTP: /(?:otp|code|verification|pin|password)[\s:]*(\d{4,8})|(?:^|\s)(\d{6})(?:\s|$)/gi,
 
   // Credit Card: 16 digits (with optional spaces/dashes)
   CARD: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g,
@@ -58,7 +59,17 @@ function detectSensitiveData(text) {
   const cardMatches = text.match(PATTERNS.CARD) || [];
   const linkMatches = text.match(PATTERNS.LINK) || [];
 
-  const hasOTP = otpMatches.length > 0;
+  // Additional validation: Filter out common false positives
+  // Ignore messages that are too short (like "hi", "hello")
+  const cleanText = text.trim().toLowerCase();
+  const isShortGreeting =
+    cleanText.length <= 10 &&
+    (cleanText.includes("hi") ||
+      cleanText.includes("hello") ||
+      cleanText.includes("hey"));
+
+  // If it's a short greeting, ignore number patterns
+  const hasOTP = !isShortGreeting && otpMatches.length > 0;
   const hasCard = cardMatches.length > 0;
   const hasLink = linkMatches.length > 0;
 
@@ -67,7 +78,7 @@ function detectSensitiveData(text) {
     hasCard,
     hasLink,
     hasSensitiveData: hasOTP || hasCard || hasLink,
-    otpMatches,
+    otpMatches: hasOTP ? otpMatches : [],
     cardMatches,
     linkMatches,
   };
@@ -177,10 +188,10 @@ async function markUserCompromised(phoneNumber, riskLevel) {
     const ttl = 30 * 24 * 60 * 60; // 30 days
     await redis.set(key, data, ttl);
 
-    console.log(`🚨 User ${phoneNumber} marked as compromised (${riskLevel})`);
+    console.log(` User ${phoneNumber} marked as compromised (${riskLevel})`);
   } catch (err) {
     console.error(
-      `❌ Failed to mark user as compromised ${phoneNumber}:`,
+      ` Failed to mark user as compromised ${phoneNumber}:`,
       err.message,
     );
   }
@@ -200,7 +211,7 @@ async function isUserCompromised(phoneNumber) {
     return data || null;
   } catch (err) {
     console.error(
-      `❌ Failed to check compromised status for ${phoneNumber}:`,
+      ` Failed to check compromised status for ${phoneNumber}:`,
       err.message,
     );
     return null;
@@ -218,10 +229,10 @@ async function clearCompromisedFlag(phoneNumber) {
     const key = `compromised:${phoneNumber}`;
     await redis.del(key);
 
-    console.log(`✅ Cleared compromised flag for ${phoneNumber}`);
+    console.log(` Cleared compromised flag for ${phoneNumber}`);
   } catch (err) {
     console.error(
-      `❌ Failed to clear compromised flag for ${phoneNumber}:`,
+      ` Failed to clear compromised flag for ${phoneNumber}:`,
       err.message,
     );
   }
@@ -244,7 +255,7 @@ function getProtectiveAction(riskLevel, currentAgent) {
         blockCurrentAgent: currentAgent === "hackerAgent",
         sendAlert: true,
         message:
-          "⚠️ For your security, I'm connecting you with our security team.",
+          " For your security, I'm connecting you with our security team.",
       };
 
     case RISK_LEVELS.HIGH:
@@ -257,7 +268,7 @@ function getProtectiveAction(riskLevel, currentAgent) {
         sendAlert: true,
         message:
           currentAgent === "hackerAgent"
-            ? "⚠️ Let me transfer you to someone who can help better."
+            ? " Let me transfer you to someone who can help better."
             : null,
       };
 
@@ -270,8 +281,8 @@ function getProtectiveAction(riskLevel, currentAgent) {
         sendAlert: true,
         message:
           currentAgent === "hackerAgent"
-            ? "👋 I'm here to help keep your account secure. For your safety, never share OTPs or passwords with anyone."
-            : "⚠️ Please don't share sensitive information like OTPs or card numbers via chat.",
+            ? " I'm here to help keep your account secure. For your safety, never share OTPs or passwords with anyone."
+            : " Please don't share sensitive information like OTPs or card numbers via chat.",
       };
 
     case RISK_LEVELS.LOW:
@@ -310,9 +321,7 @@ async function enforceProductionSafety(phoneNumber, currentAgent) {
   }
 
   if (currentAgent === "hackerAgent") {
-    console.log(
-      `🛡️ PRODUCTION SAFETY: Disabling hackerAgent for ${phoneNumber}`,
-    );
+    console.log(` PRODUCTION SAFETY: Disabling hackerAgent for ${phoneNumber}`);
 
     return {
       enforced: true,
